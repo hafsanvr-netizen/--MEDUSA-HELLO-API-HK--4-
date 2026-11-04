@@ -24,8 +24,8 @@ WRONG_KEY_RESPONSE = {
 }
 # -------------------------------
 
-LIKES_PER_TOKEN_PER_DAY = 150
-LIKES_PER_USER_REQUEST = 220          # প্রতিটি ইউজারকে ২২০+ লাইক দেওয়ার টার্গেট
+LIKES_PER_TOKEN_PER_DAY = 170
+LIKES_PER_USER_REQUEST = 700          # প্রতিটি ইউজারকে ২২০+ লাইক দেওয়ার টার্গেট
 TOKEN_FILE = "token_bd.json"          # একটাই টোকেন ফাইল (২০০+ গেস্ট আইডি)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
