@@ -25,8 +25,7 @@ WRONG_KEY_RESPONSE = {
 # -------------------------------
 
 LIKES_PER_TOKEN_PER_DAY = 30          # ← প্রতি guest id দিনে ৩০ বার লাইক
-LIKES_PER_USER_REQUEST = 700          # প্রতি user request এ target (capacity সাপেক্ষে সীমিত)
-TOKEN_FILE = "token_bd.json"          # ১১০টি guest id
+TOKEN_FILE = "token_bd.json"          # সব guest id এখান থেকে লোড হবে
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -198,13 +197,15 @@ def get_like_api_url(server_name):
         return "https://clientbp.ppmainecoonghj.com/LikeProfile"
 
 
-def select_tokens_for_likes(all_tokens, required_count, state):
-    """প্রয়োজনীয় সংখ্যক টোকেন বাছাই করে যেগুলোর দৈনিক লিমিট (৩০/দিন) বাকি আছে।"""
+def select_tokens_for_likes(all_tokens, state):
+    """
+    token_bd.json এর সব guest ID ব্যবহার করে।
+    প্রতিটি টোকেন দিনে LIKES_PER_TOKEN_PER_DAY (30) বার লাইক দিতে পারবে।
+    যেগুলোর লিমিট শেষ, সেগুলো বাদ যাবে।
+    """
     usage = state["usage"]
     selected = []
     for token_dict in all_tokens:
-        if len(selected) >= required_count:
-            break
         tok = token_dict["token"]
         used = usage.get(tok, 0)
         if used < LIKES_PER_TOKEN_PER_DAY:
@@ -226,6 +227,15 @@ app = Flask(__name__)
 
 @app.route('/', methods=['GET'])
 def home():
+    all_tokens = load_all_tokens()
+    with state_lock:
+        state = load_state()
+        usage = state["usage"]
+
+    total_used = sum(usage.get(t["token"], 0) for t in all_tokens)
+    total_cap = len(all_tokens) * LIKES_PER_TOKEN_PER_DAY
+    remaining = max(0, total_cap - total_used)
+
     return jsonify({
         "api": "Free Fire Like API",
         "status": "online",
@@ -234,9 +244,16 @@ def home():
             "/token_info": "?key=YOUR_KEY"
         },
         "config": {
-            "tokens": "110 guest IDs",
+            "token_file": TOKEN_FILE,
+            "total_tokens_loaded": len(all_tokens),
             "likes_per_token_per_day": LIKES_PER_TOKEN_PER_DAY,
-            "daily_capacity": 110 * LIKES_PER_TOKEN_PER_DAY
+            "daily_capacity": total_cap
+        },
+        "today_usage": {
+            "date_utc": state.get("date"),
+            "used": total_used,
+            "capacity": total_cap,
+            "remaining": remaining
         },
         "credits": "@HAFSAN_KUN"
     })
@@ -273,12 +290,10 @@ def handle_requests():
     before_likes = int(before_info.AccountInfo.Likes) if (before_info and hasattr(before_info, 'AccountInfo')) else 0
     print(f"UID {uid_param}: before = {before_likes}")
 
-    # প্রতিটি টোকেন এখন দিনে ৩০ বার লাইক দিতে পারে
-    # তাই ২২০+ এর জন্য এখন ২২০টি টোকেন লাগবে, কিন্তু আমাদের আছে ১১০টি
-    # কাজেই capacity অনুযায়ী টোকেন বাছাই করবো
+    # token_bd.json এর সব guest ID ব্যবহার করবে (যাদের 30/দিন লিমিট বাকি)
     with state_lock:
         state = load_state()
-        selected = select_tokens_for_likes(all_tokens, LIKES_PER_USER_REQUEST, state)
+        selected = select_tokens_for_likes(all_tokens, state)
 
     if not selected:
         return jsonify({
@@ -288,7 +303,7 @@ def handle_requests():
             "PlayerNickname": "N/A",
             "UID": int(uid_param),
             "status": 2,
-            "message": "All tokens reached daily limit (30/token/day). Try again tomorrow (UTC).",
+            "message": f"All tokens reached daily limit ({LIKES_PER_TOKEN_PER_DAY}/token/day). Try again tomorrow (UTC).",
             "credits": "@HAFSAN_KUN"
         })
 
@@ -374,29 +389,33 @@ def token_info():
     remaining = max(0, cap - used)
 
     per_token_status = []
-    for t in all_tokens[:10]:
+    for t in all_tokens:
         tok = t["token"]
         u = usage.get(tok, 0)
         per_token_status.append({
             "token_preview": tok[:8] + "..." if len(tok) > 8 else tok,
             "used": u,
-            "remaining": max(0, LIKES_PER_TOKEN_PER_DAY - u)
+            "remaining": max(0, LIKES_PER_TOKEN_PER_DAY - u),
+            "exhausted": u >= LIKES_PER_TOKEN_PER_DAY
         })
+
+    active_tokens = sum(1 for t in all_tokens if usage.get(t["token"], 0) < LIKES_PER_TOKEN_PER_DAY)
 
     return jsonify({
         "date_utc": state.get("date"),
         "file": TOKEN_FILE,
         "total": {
             "tokens": len(all_tokens),
+            "active_tokens": active_tokens,
+            "exhausted_tokens": len(all_tokens) - active_tokens,
             "used_today": used,
             "capacity_today": cap,
             "remaining_today": remaining
         },
         "config": {
-            "LIKES_PER_TOKEN_PER_DAY": LIKES_PER_TOKEN_PER_DAY,
-            "LIKES_PER_USER_REQUEST": LIKES_PER_USER_REQUEST
+            "LIKES_PER_TOKEN_PER_DAY": LIKES_PER_TOKEN_PER_DAY
         },
-        "sample_tokens": per_token_status,
+        "tokens": per_token_status,
         "credits": "@HAFSAN_KUN"
     })
 
